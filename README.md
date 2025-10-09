@@ -8,7 +8,7 @@ No database, 100% server (nodejs or Docker), just sends the submissions by email
 
 100% free software. No data is kept on the server. No tracking. No cookie.
 
-Suggestion: thanks to the webhook feature you can automate the management of the subissions with tools like [Huginn](https://github.com/huginn/huginn), [node-red](https://nodered.org/), [codeberg](https://codeberg.org/about/)/[forgejo](https://forgejo.org/)...
+Suggestion: thanks to the webhook feature you can automate the management of the submissions with tools like [Huginn](https://github.com/huginn/huginn), [node-red](https://nodered.org/), [codeberg](https://codeberg.org/about/)/[forgejo](https://forgejo.org/)...
 
 Links:
 
